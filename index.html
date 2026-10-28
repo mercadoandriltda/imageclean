@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ImageClean — Limpar metadados de imagens</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0c101a;--panel:#151c2a;--line:#30394b;--txt:#eff3ff;--muted:#9aa9c3;--accent:#8c9aff}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(ellipse at top,#1b2540 0%,var(--bg) 65%);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--txt);padding:24px}
+    main{width:min(100%,760px)}h1{margin:0;font-size:clamp(29px,5vw,42px);letter-spacing:-1.5px}p{color:var(--muted)}.lead{margin:4px 0 26px}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:24px;box-shadow:0 22px 70px #0004}
+    .drop{border:2px dashed #53617e;border-radius:16px;min-height:200px;padding:25px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:8px;cursor:pointer;transition:.2s;background:#121a29}
+    .drop.over,.drop:hover{border-color:var(--accent);background:#202941}.drop svg{width:43px;height:43px;color:#a8b2ff}.drop strong{font-size:18px}.drop span{color:var(--muted);font-size:13px}
+    input[type=file]{display:none}.button{border:0;border-radius:11px;background:#8896ff;color:#0d1431;padding:12px 18px;font:700 14px system-ui;cursor:pointer;transition:.2s}.button:hover{filter:brightness(1.13)}.button:disabled{opacity:.45;cursor:not-allowed}.secondary{background:#303b55;color:#f3f4ff}
+    .options{display:flex;gap:16px;align-items:end;flex-wrap:wrap;margin:22px 0 0}.field{display:grid;gap:6px;color:var(--muted);font-size:13px}.field select{min-width:150px;appearance:none;background:#0f1625;color:var(--txt);border:1px solid #424e67;padding:11px 14px;border-radius:10px;font-size:14px}
+    .result{display:none;border-top:1px solid var(--line);margin-top:25px;padding-top:23px}.result.show{display:block}.preview{background:repeating-conic-gradient(#283044 0% 25%,#20283b 0% 50%) 50%/20px 20px;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:150px;max-height:360px}.preview img{display:block;max-width:100%;max-height:360px;object-fit:contain}
+    .meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin:12px 0 18px}.actions{display:flex;gap:10px;flex-wrap:wrap}.note{font-size:12px;color:#a2afc7;margin:19px 0 0}.status{color:#ffb3b3;margin:14px 0 0;min-height:1.5em}.badge{display:inline-block;background:#273c38;color:#a5ead4;border-radius:50px;padding:3px 9px;font-size:12px;margin-left:6px}footer{font-size:12px;text-align:center;margin-top:20px;color:#7f8ca6}
+  </style>
+</head>
+<body>
+<main>
+  <h1>ImageClean <span class="badge">100% local</span></h1>
+  <p class="lead">Arraste uma imagem, remova seus metadados e baixe uma cópia limpa. Nada é enviado a servidores.</p>
+  <section class="panel">
+    <div class="drop" id="drop" role="button" tabindex="0" aria-label="Selecionar ou arrastar imagem">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+      <strong>Arraste e solte uma imagem aqui</strong>
+      <span>ou clique para escolher um arquivo (PNG, JPEG, WebP, AVIF e outros formatos compatíveis com o navegador)</span>
+    </div>
+    <input id="file" type="file" accept="image/*" />
+    <div class="options">
+      <label class="field">Formato de saída
+        <select id="format"><option value="image/png">PNG — sem perdas adicionais</option><option value="image/jpeg">JPEG — menor tamanho</option><option value="image/webp">WebP — menor tamanho</option></select>
+      </label>
+      <button class="button" id="clean" disabled>Limpar metadados</button>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+    <div class="result" id="result">
+      <div class="preview"><img id="preview" alt="Prévia da imagem reexportada" /></div>
+      <div class="meta" id="info"></div>
+      <div class="actions"><button class="button" id="download">Baixar imagem limpa</button><button class="button secondary" id="again">Escolher outra imagem</button></div>
+    </div>
+    <p class="note">Observação: a reexportação elimina metadados extras, como EXIF e dados de procedência C2PA, em navegadores compatíveis. Não remove marcas d’água visíveis ou invisíveis codificadas nos pixels. A aparência é preservada, mas o arquivo não será idêntico byte a byte; JPEG/WebP podem causar perda de qualidade.</p>
+  </section>
+  <footer>Processamento no próprio dispositivo • Sem upload • Sem dependências</footer>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const drop = $('drop'), input = $('file'), clean = $('clean'), format = $('format'), status = $('status');
+  const result = $('result'), preview = $('preview'), info = $('info'), download = $('download');
+  let source = null, output = null, outputURL = null;
+  const humanSize = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n/1024).toFixed(1)} KB` : `${(n/1048576).toFixed(2)} MB`;
+  function clearOutput(){if(outputURL) URL.revokeObjectURL(outputURL);outputURL=null;output=null;result.classList.remove('show');preview.removeAttribute('src');}
+  function setFile(file){clearOutput();status.textContent='';if(!file)return;if(!file.type.startsWith('image/')){status.textContent='Escolha um arquivo de imagem válido.';return;}
+    source=file;clean.disabled=false;drop.querySelector('strong').textContent=file.name;drop.querySelector('span').textContent=`${humanSize(file.size)} • pronto para processar`;
+  }
+  drop.addEventListener('click',()=>input.click());drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();input.click();}});
+  input.addEventListener('change',()=>setFile(input.files?.[0]));
+  for(const ev of ['dragenter','dragover'])drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')});
+  for(const ev of ['dragleave','drop'])drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')});
+  drop.addEventListener('drop',e=>setFile([...e.dataTransfer.files].find(f=>f.type.startsWith('image/'))));
+  document.addEventListener('dragover',e=>e.preventDefault());document.addEventListener('drop',e=>{if(!drop.contains(e.target))e.preventDefault()});
+  clean.addEventListener('click',async()=>{
+    if(!source)return;clean.disabled=true;clearOutput();status.textContent='Processando...';
+    try{
+      // Decodifica pixels e exporta novamente via canvas, sem copiar os chunks de metadados originais.
+      // createImageBitmap com orientação EXIF aplicada preserva o enquadramento exibido pelo navegador.
+      const bitmap=await createImageBitmap(source,{imageOrientation:'from-image'});
+      if(!bitmap.width||!bitmap.height)throw new Error('Dimensões inválidas.');
+      const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
+      const ctx=canvas.getContext('2d',{alpha:format.value!=='image/jpeg'});
+      if(!ctx)throw new Error('Não foi possível criar a área de renderização.');
+      if(format.value==='image/jpeg'){ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);}
+      ctx.drawImage(bitmap,0,0);bitmap.close();
+      const mime=format.value;
+      const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Falha ao exportar a imagem.')),mime,0.98));
+      if(blob.type!==mime)throw new Error('Este navegador não suporta a exportação para o formato escolhido.');
+      output=blob;outputURL=URL.createObjectURL(blob);preview.src=outputURL;
+      info.textContent=`${canvas.width} × ${canvas.height} px  •  Original: ${humanSize(source.size)}  •  Limpa: ${humanSize(blob.size)}  •  ${mime.split('/')[1].toUpperCase()}`;
+      result.classList.add('show');status.textContent='Imagem reexportada com sucesso.';
+    }catch(error){status.textContent=`Erro: ${error.message}. Tente um PNG ou JPEG compatível com o navegador.`;}
+    finally{clean.disabled=false;}
+  });
+  download.addEventListener('click',()=>{if(!outputURL)return;const a=document.createElement('a');a.href=outputURL;const ext={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[output.type]||'png';a.download=(source.name.replace(/\.[^.]*$/,'')||'imagem')+'_sem_metadados.'+ext;document.body.append(a);a.click();a.remove();});
+  $('again').addEventListener('click',()=>{input.value='';input.click()});
+  window.addEventListener('beforeunload',()=>{if(outputURL)URL.revokeObjectURL(outputURL)});
+})();
+</script>
+</body>
+</html>
